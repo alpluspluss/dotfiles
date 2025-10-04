@@ -7,32 +7,39 @@
         </edit>
     </match>
     
-    <!-- Set default fonts with CJK fallback -->
-    <alias>
+    <alias binding="strong">
         <family>sans-serif</family>
         <prefer>
             <family>Rubik</family>
-            <family>Noto Sans CJK SC</family>
-            <family>Noto Sans CJK TC</family>
-            <family>Noto Sans CJK JP</family>
-            <family>Noto Sans CJK KR</family>
-            <family>Noto Sans CJK HK</family>
         </prefer>
     </alias>
-    
-    <alias>
+
+    <alias binding="strong">
         <family>monospace</family>
         <prefer>
             <family>JetBrains Mono</family>
-            <family>Noto Sans Mono CJK SC</family>
-            <family>Noto Sans Mono CJK TC</family>
-            <family>Noto Sans Mono CJK JP</family>
-            <family>Noto Sans Mono CJK KR</family>
-            <family>Noto Sans Mono CJK HK</family>
         </prefer>
     </alias>
+
+    <match target="pattern">
+        <test qual="any" name="family">
+            <string>monospace</string>
+        </test>
+        <edit name="size" mode="assign">
+            <double>11</double>
+        </edit>
+    </match>
     
-    <alias>
+    <match target="pattern">
+        <test qual="any" name="family">
+            <string>ui-monospace</string>
+        </test>
+        <edit name="size" mode="assign">
+            <double>11</double>
+        </edit>
+    </match>
+    
+    <alias binding="strong">
         <family>serif</family>
         <prefer>
             <family>Noto Serif CJK SC</family>
@@ -40,6 +47,20 @@
             <family>Noto Serif CJK JP</family>
             <family>Noto Serif CJK KR</family>
             <family>Noto Serif CJK HK</family>
+        </prefer>
+    </alias>
+    
+    <alias binding="strong">
+        <family>ui-monospace</family>
+        <prefer>
+            <family>JetBrains Mono</family>
+        </prefer>
+    </alias>
+    
+    <alias binding="strong">
+        <family>SFMono-Regular</family>
+        <prefer>
+            <family>JetBrains Mono</family>
         </prefer>
     </alias>
 </fontconfig>
