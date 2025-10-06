@@ -12,6 +12,7 @@ depends=(
     'fragments-of-dawn-dev'
     'fragments-of-dawn-audio'
     'fragments-of-dawn-fonts'
+    'fragments-of-dawn-theming'
 )
 
 package() {
