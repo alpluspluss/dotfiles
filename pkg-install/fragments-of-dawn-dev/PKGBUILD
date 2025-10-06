@@ -1,0 +1,18 @@
+pkgname=fragments-of-dawn-dev
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Fragments of Dawn: Development tools'
+arch=('any')
+license=('MIT')
+
+depends=(
+    'bun-bin'
+    'jq'
+    'llvm'
+    'ninja'
+    'git'
+)
+
+package() {
+    true
+}

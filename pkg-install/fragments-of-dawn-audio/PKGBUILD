@@ -1,0 +1,16 @@
+pkgname=fragments-of-dawn-audio
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Fragments of Dawn: Audio'
+arch=('any')
+license=('MIT')
+
+depends=(
+    'noto-fonts-cjk'
+    'ttf-jetbrains-mono'
+    'ttf-rubik-vf'
+)
+
+package() {
+    true
+}
