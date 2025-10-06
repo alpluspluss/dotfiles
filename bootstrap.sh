@@ -3,13 +3,14 @@
 #!/bin/bash
 
 # the script assumes you have internet access as you can curl it from the internet
+# and defaults to systemd-boot
 set -e
 
 # color output
 info() { echo -e "\033[0;36m[INFO]\033[0m $*"; }
 warn() { echo -e "\033[0;33m[WARN]\033[0m $*"; }
 error() { echo -e "\033[0;31m[ERROR]\033[0m $*"; exit 1; }
-prompt() { echo -e "\033[0;32m[?]\033[0m $*"; }
+prompt() { echo -ne "\033[0;32m[?]\033[0m $* "; }
 
 # this script must be run as root and in live environment
 [[ $EUID -ne 0 ]] && error "This script must be run as root!"
@@ -79,10 +80,38 @@ fi
 info "Mounting root partition..."
 mount "$ROOT_PART" /mnt
 
+# check if EFI partition exists and handle bootloader detection
+BOOTLOADER_MODE="none"
 if [[ -n "$EFI_PART" ]]; then
     info "Mounting EFI partition..."
     mkdir -p /mnt/boot
     mount "$EFI_PART" /mnt/boot
+    
+    # check for existing systemd-boot installation
+    if [[ -d /mnt/boot/EFI/systemd ]] || [[ -d /mnt/boot/loader ]]; then
+        info "Detected existing systemd-boot installation"
+        prompt "Setup dual boot? (Y/n):"
+        read -r DUAL_BOOT
+        DUAL_BOOT=${DUAL_BOOT:-y}
+        
+        if [[ "$DUAL_BOOT" =~ ^[Yy]$ ]]; then
+            BOOTLOADER_MODE="dual"
+            info "Will configure dual boot setup (preserving existing entries)"
+        else
+            prompt "Reinstall systemd-boot? This will remove existing entries! (y/N):"
+            read -r REINSTALL
+            if [[ "$REINSTALL" =~ ^[Yy]$ ]]; then
+                BOOTLOADER_MODE="single"
+                info "Will reinstall systemd-boot (existing entries will be removed)"
+            else
+                BOOTLOADER_MODE="none"
+                warn "Skipping bootloader setup"
+            fi
+        fi
+    else
+        info "No existing bootloader detected"
+        BOOTLOADER_MODE="single"
+    fi
 fi
 
 prompt "Enter additional packages to install. Press enter for base only:"
@@ -104,6 +133,9 @@ read -r HOSTNAME
 prompt "Enter timezone. Examples: Asia/Bangkok, America/New_York:"
 read -r TIMEZONE
 
+# get root partition UUID for bootloader configuration
+ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
+
 cat > /mnt/root/configure.sh <<'CHROOT_SCRIPT'
 #!/bin/bash
 set -e
@@ -111,7 +143,7 @@ set -e
 info() { echo -e "\033[0;36m[INFO]\033[0m $*"; }
 warn() { echo -e "\033[0;33m[WARN]\033[0m $*"; }
 error() { echo -e "\033[0;31m[ERROR]\033[0m $*"; exit 1; }
-prompt() { echo -e "\033[0;32m[?]\033[0m $*"; }
+prompt() { echo -ne "\033[0;32m[?]\033[0m $* "; }
 
 # timezone
 ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
@@ -150,11 +182,11 @@ info "Set root password:"
 passwd
 
 prompt "Create a user account (username):"
-read -p "" USERNAME
+read USERNAME
 
 if [[ -n "$USERNAME" ]]; then
     prompt "Make $USERNAME sudo? (y/N):"
-    read -p "" MAKE_SUDO
+    read MAKE_SUDO
 
     if [[ "$MAKE_SUDO" =~ ^[Yy]$ ]]; then
         useradd -m -G wheel -s /bin/bash "$USERNAME"
@@ -171,6 +203,63 @@ else
     warn "No user created. You'll need to login as root after reboot."
 fi
 
+# bootloader setup
+if [[ "$BOOTLOADER_MODE" == "single" ]]; then
+    info "Installing systemd-boot..."
+    bootctl install
+    
+    # create loader configuration
+    cat > /boot/loader/loader.conf <<EOF
+default arch.conf
+timeout 3
+console-mode max
+editor no
+EOF
+    
+    # create arch linux boot entry
+    mkdir -p /boot/loader/entries
+    cat > /boot/loader/entries/arch.conf <<EOF
+title   Arch Linux
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options root=UUID=$ROOT_UUID rw
+EOF
+    
+    info "systemd-boot installed and configured"
+    
+elif [[ "$BOOTLOADER_MODE" == "dual" ]]; then
+    info "Configuring dual boot setup..."
+    
+    # update systemd-boot if needed
+    bootctl update
+    
+    # create arch linux boot entry with unique name
+    ENTRY_NAME="arch"
+    COUNTER=1
+    while [[ -f "/boot/loader/entries/${ENTRY_NAME}.conf" ]]; do
+        ENTRY_NAME="arch-${COUNTER}"
+        ((COUNTER++))
+    done
+    
+    mkdir -p /boot/loader/entries
+    cat > /boot/loader/entries/${ENTRY_NAME}.conf <<EOF
+title   Arch Linux
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options root=UUID=$ROOT_UUID rw
+EOF
+    
+    info "Created boot entry: ${ENTRY_NAME}.conf"
+    info "Existing boot entries preserved"
+    
+    # show existing entries
+    info "Current boot entries:"
+    ls -1 /boot/loader/entries/*.conf | xargs -n1 basename
+    
+elif [[ "$BOOTLOADER_MODE" == "none" ]]; then
+    warn "Bootloader setup skipped. You'll need to configure it manually."
+fi
+
 info "Chroot configuration complete!"
 CHROOT_SCRIPT
 
@@ -183,6 +272,8 @@ export TIMEZONE='$TIMEZONE'
 export HOSTNAME='$HOSTNAME'
 export SWAP_TYPE='$SWAP_TYPE'
 export SWAP_SIZE='$SWAP_SIZE'
+export BOOTLOADER_MODE='$BOOTLOADER_MODE'
+export ROOT_UUID='$ROOT_UUID'
 /root/configure.sh
 "
 
@@ -190,7 +281,9 @@ export SWAP_SIZE='$SWAP_SIZE'
 rm /mnt/root/configure.sh
 
 # final instructions
-# now, users will have to configure bootloader themselves
 info "Installation complete!"
+if [[ "$BOOTLOADER_MODE" == "none" ]]; then
+    warn "Don't forget to install and configure a bootloader before rebooting!"
+fi
 prompt "Press Enter to exit..."
 read
