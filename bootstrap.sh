@@ -3,7 +3,10 @@
 #!/bin/bash
 
 # the script assumes you have internet access as you can curl it from the internet
-# and defaults to systemd-boot
+# and defaults to systemd-boot.
+# 
+# if this is `git clone`'d then we will override the default systems with ones that are available
+# in `/etc`.
 set -e
 
 # color output
@@ -19,6 +22,16 @@ prompt() { echo -ne "\033[0;32m[?]\033[0m $* "; }
 info "Arch Linux Bootstrap Script"
 echo
 
+# if this script is gotten from git cloning the whole repository
+# and not curl'd
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -d "$SCRIPT_DIR/.git" ]] || [[ -f "$SCRIPT_DIR/.git" ]]; then
+    info "Detected git repository, will use custom configs from ./etc/"
+    USE_CUSTOM_CONFIGS=true
+else
+    USE_CUSTOM_CONFIGS=false
+fi
+
 # show disk information and make a prompt
 # so the user can select their target partition
 info "Available disks and partitions:"
@@ -30,7 +43,7 @@ read -r ROOT_PART
 [[ ! -b "$ROOT_PART" ]] && error "Invalid partition: $ROOT_PART"
 
 # select the filesystem type. this defaults to ext4
-prompt "Enter filesystem type (ext4/btrfs) [ext4]:"
+prompt "Select a filesystem for the root partition.\n (default: ext4):"
 read -r FS_TYPE
 FS_TYPE=${FS_TYPE:-ext4}
 
@@ -44,21 +57,30 @@ fi
 
 # swap configuration
 prompt "Configure swap? (y/N):"
-read -r SWAP_TYPE
-SWAP_TYPE=${SWAP_TYPE:-none}
+read -r CONFIGURE_SWAP
 
-if [[ "$SWAP_TYPE" == "partition" ]]; then
-    prompt "Enter swap partition:"
-    read -r SWAP_PART
-    [[ ! -b "$SWAP_PART" ]] && error "Invalid swap partition: $SWAP_PART"
+if [[ "$CONFIGURE_SWAP" =~ ^[Yy]$ ]]; then
+    prompt "Swap type (partition/file):"
+    read -r SWAP_TYPE
+    
+    if [[ "$SWAP_TYPE" == "partition" ]]; then
+        prompt "Enter swap partition:"
+        read -r SWAP_PART
+        [[ ! -b "$SWAP_PART" ]] && error "Invalid swap partition: $SWAP_PART"
 
-    info "Setting up swap partition..."
-    mkswap "$SWAP_PART"
-    swapon "$SWAP_PART"
-elif [[ "$SWAP_TYPE" == "file" ]]; then
-    prompt "Enter swapfile size in GB [8]:"
-    read -r SWAP_SIZE
-    SWAP_SIZE=${SWAP_SIZE:-8}
+        info "Setting up swap partition..."
+        mkswap "$SWAP_PART"
+        swapon "$SWAP_PART"
+    elif [[ "$SWAP_TYPE" == "file" ]]; then
+        prompt "Enter swapfile size in GB [8]:"
+        read -r SWAP_SIZE
+        SWAP_SIZE=${SWAP_SIZE:-8}
+    else
+        warn "Invalid swap type, skipping swap configuration"
+        SWAP_TYPE="none"
+    fi
+else
+    SWAP_TYPE="none"
 fi
 
 # format confirmation
@@ -126,6 +148,23 @@ pacstrap -K /mnt base linux linux-firmware base-devel \
 info "Generating fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
 
+# custom configs
+if [[ "$USE_CUSTOM_CONFIGS" == "true" ]]; then
+    info "Installing custom mkinitcpio configuration..."
+    
+    if [[ -f "$SCRIPT_DIR/etc/mkinitcpio.conf" ]]; then
+        cp "$SCRIPT_DIR/etc/mkinitcpio.conf" /mnt/etc/mkinitcpio.conf
+    else
+        warn "Custom mkinitcpio.conf not found, using default"
+    fi
+    
+    if [[ -f "$SCRIPT_DIR/etc/mkinitcpio.d/linux.preset" ]]; then
+        cp "$SCRIPT_DIR/etc/mkinitcpio.d/linux.preset" /mnt/etc/mkinitcpio.d/linux.preset
+    else
+        warn "Custom linux.preset not found, using default"
+    fi
+fi
+
 # configuring system in chroot
 info "Configuring system..."
 prompt "Enter hostname:"
@@ -134,7 +173,7 @@ prompt "Enter timezone. Examples: Asia/Bangkok, America/New_York:"
 read -r TIMEZONE
 
 # get root partition UUID for bootloader configuration
-ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
+ROOT_UUID=$(blkid -s UUID -o value -p "$ROOT_PART")
 
 cat > /mnt/root/configure.sh <<'CHROOT_SCRIPT'
 #!/bin/bash
@@ -164,7 +203,16 @@ EOF
 systemctl enable NetworkManager
 
 # regenerate initcpio
+if [[ "$USE_CUSTOM_CONFIGS" == "true" ]]; then
+    info "Regenerating initramfs with custom config (this may take a few minutes)..."
+else
+    info "Regenerating initramfs..."
+fi
 mkinitcpio -P
+
+if [[ "$USE_CUSTOM_CONFIGS" == "true" ]] && [[ ! -f /boot/initramfs-linux-fallback.img ]]; then
+       info "No fallback image generated. You must ensure first boot succeeds!"
+fi
 
 # setup swapfile if requested
 if [[ "$SWAP_TYPE" == "file" ]]; then
@@ -274,6 +322,7 @@ export SWAP_TYPE='$SWAP_TYPE'
 export SWAP_SIZE='$SWAP_SIZE'
 export BOOTLOADER_MODE='$BOOTLOADER_MODE'
 export ROOT_UUID='$ROOT_UUID'
+export USE_CUSTOM_CONFIGS='$USE_CUSTOM_CONFIGS'
 /root/configure.sh
 "
 
